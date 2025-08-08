@@ -38,8 +38,8 @@ Sales Desk is an AI assistant that:
 
 ```bash
 # Clone repository
-git clone <repository-url>
-cd sales_agent
+git clone https://github.com/evalops/sales-desk.git
+cd sales-desk
 
 # Create virtual environment
 python3 -m venv venv
