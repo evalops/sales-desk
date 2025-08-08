@@ -1,0 +1,199 @@
+# Sales Desk Configuration
+# This file allows customization of artifacts, policies, and response templates
+
+# Document Artifacts Configuration
+artifacts:
+  soc2:
+    name: "SOC 2 Type II Report"
+    sensitivity: high
+    requires_nda: true
+    description: "Annual SOC 2 Type II audit report"
+    file_path: "/secure/documents/soc2_report_latest.pdf"
+    keywords:
+      - "soc 2"
+      - "soc2"
+      - "soc-2"
+      - "soc ii"
+      - "type 2"
+      - "type ii"
+      - "audit report"
+  
+  iso27001:
+    name: "ISO 27001 Certificate"
+    sensitivity: medium
+    requires_nda: false
+    description: "ISO 27001 certification"
+    file_path: "/secure/documents/iso27001_cert.pdf"
+    keywords:
+      - "iso 27001"
+      - "iso27001"
+      - "iso certification"
+      - "27001"
+  
+  security_whitepaper:
+    name: "Security Architecture Whitepaper"
+    sensitivity: medium
+    requires_nda: false
+    description: "Technical security architecture overview"
+    file_path: "/secure/documents/security_whitepaper.pdf"
+    keywords:
+      - "security whitepaper"
+      - "security overview"
+      - "architecture document"
+      - "security architecture"
+  
+  pentest:
+    name: "Penetration Test Report"
+    sensitivity: high
+    requires_nda: true
+    description: "Latest penetration testing results"
+    file_path: "/secure/documents/pentest_report_latest.pdf"
+    keywords:
+      - "penetration test"
+      - "pen test"
+      - "pentest"
+      - "vulnerability assessment"
+      - "security test"
+  
+  vendor_questionnaire:
+    name: "Security Questionnaire Template"
+    sensitivity: low
+    requires_nda: false
+    description: "Standard vendor security questionnaire"
+    file_path: "/secure/documents/vendor_questionnaire.xlsx"
+    keywords:
+      - "questionnaire"
+      - "security questionnaire"
+      - "vendor form"
+      - "security assessment"
+  
+  privacy_policy:
+    name: "Privacy Policy"
+    sensitivity: low
+    requires_nda: false
+    description: "Current privacy policy"
+    file_path: "/secure/documents/privacy_policy.pdf"
+    keywords:
+      - "privacy policy"
+      - "data privacy"
+      - "privacy notice"
+  
+  dpa:
+    name: "Data Processing Agreement"
+    sensitivity: medium
+    requires_nda: false
+    description: "Standard DPA template"
+    file_path: "/secure/documents/dpa_template.pdf"
+    keywords:
+      - "dpa"
+      - "data processing"
+      - "processing agreement"
+      - "gdpr agreement"
+  
+  insurance:
+    name: "Insurance Certificate"
+    sensitivity: medium
+    requires_nda: false
+    description: "Cyber liability insurance certificate"
+    file_path: "/secure/documents/insurance_cert.pdf"
+    keywords:
+      - "insurance"
+      - "cyber insurance"
+      - "liability insurance"
+      - "insurance certificate"
+
+# NDA Database
+# Use email addresses or domain wildcards (*@domain.com)
+nda_database:
+  - "acme@example.com"
+  - "trusted@partner.com"
+  - "*@enterprise.com"
+  - "*@bigcorp.io"
+
+# Response Templates
+templates:
+  # Template for when documents are approved
+  approved_response: |
+    Hi {sender_name},
+
+    Thank you for your security documentation request.
+
+    I'm preparing the following documents for you:
+    {approved_list}
+
+    You'll receive a secure link within the next few minutes that will be valid for {expiration_days} days.
+
+    Best regards,
+    {signature}
+  
+  # Template for when NDA is required
+  nda_required: |
+    Hi {sender_name},
+
+    Thank you for your security documentation request.
+
+    {approved_section}
+    
+    The following documents require an executed NDA before sharing:
+    {denied_list}
+
+    Please have your legal team complete our mutual NDA, and I'll send these immediately after execution.
+
+    Best regards,
+    {signature}
+  
+  # Template for unclear requests
+  unclear_request: |
+    Hi {sender_name},
+
+    Thank you for reaching out. I couldn't identify specific security documents in your request.
+
+    Could you please clarify which of the following you need:
+    {available_documents}
+
+    Best regards,
+    {signature}
+
+# System Settings
+settings:
+  # Link expiration in days
+  link_expiration_days: 7
+  
+  # Email signature
+  email_signature: "Sales Desk Team"
+  
+  # Company name
+  company_name: "Your Company"
+  
+  # Monitoring settings
+  monitoring:
+    # Check interval in seconds
+    check_interval: 60
+    
+    # Max emails to process per cycle
+    max_per_cycle: 10
+    
+    # Gmail search queries
+    search_queries:
+      - "is:unread (soc2 OR soc 2 OR security OR compliance OR audit OR questionnaire)"
+      - "is:unread subject:(security documentation OR due diligence OR vendor assessment)"
+      - "is:unread (DPA OR GDPR OR privacy OR NDA OR pentest OR iso27001)"
+  
+  # Escalation rules
+  escalation:
+    # Route to human if these keywords appear
+    human_review_keywords:
+      - "legal"
+      - "contract"
+      - "lawsuit"
+      - "breach"
+      - "incident"
+    
+    # Max sensitive documents without NDA before escalation
+    max_sensitive_without_nda: 2
+  
+  # Logging
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+    file: "sales_desk.log"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

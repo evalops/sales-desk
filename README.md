@@ -219,11 +219,83 @@ main.py           # Entry point and CLI interface
 └── gmail_monitor.py # Inbox monitoring and orchestration
 ```
 
+## Advanced Features
+
+### 🐳 Docker Deployment
+```bash
+# Build and run with Docker Compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f sales-desk
+```
+
+### 🔧 Configuration File
+Customize artifacts, templates, and policies in `config.yaml`:
+- Define custom artifacts and keywords
+- Configure NDA database
+- Customize email templates
+- Set monitoring intervals and escalation rules
+
+### 🌐 Webhook Server
+Run the FastAPI webhook server for real-time processing:
+```bash
+# Install additional dependencies
+pip install -r requirements-full.txt
+
+# Run webhook server
+python webhook_server.py
+
+# API endpoints:
+# POST /webhook/gmail - Gmail push notifications
+# POST /api/process - Manual request processing
+# GET /metrics - View metrics
+# GET /health - Health check
+```
+
+### 📊 Database Support
+PostgreSQL schema included for:
+- Document request tracking
+- Audit trail logging
+- NDA agreement management
+- Metrics collection
+- Secure link tracking
+
+### 🔒 Enhanced Security
+- Retry logic with exponential backoff
+- Audit logging for compliance
+- Secure link generation
+- Email validation and sanitization
+- Rate limiting support
+
+### 📈 Metrics & Monitoring
+- Request processing metrics
+- Response time tracking
+- Artifact popularity analysis
+- Error rate monitoring
+- Escalation tracking
+
+## Dependencies
+
+### Core (Required)
+```bash
+pip install -r requirements.txt
+```
+
+### Full Stack (Optional)
+```bash
+pip install -r requirements-full.txt
+```
+
 ## Future Enhancements
 
-- [ ] Webhook integration for real-time processing
-- [ ] Database for tracking sent documents
+- [x] Webhook integration for real-time processing
+- [x] Database for tracking sent documents
+- [x] Configuration file system
+- [x] Docker deployment
+- [x] Metrics collection
+- [x] Audit logging
 - [ ] Analytics dashboard for request patterns
 - [ ] Slack/Teams notifications for escalations
 - [ ] Document watermarking integration
-- [ ] Secure link generation with expiration
+- [ ] S3/Cloud storage integration

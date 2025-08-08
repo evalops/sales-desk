@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  sales-desk:
+    build: .
+    container_name: sales-desk
+    restart: unless-stopped
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./token.pickle:/app/token.pickle
+      - ./logs:/app/logs
+      - ./documents:/app/documents
+    command: python main.py monitor --interval 60
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional: PostgreSQL for audit trail
+  postgres:
+    image: postgres:15-alpine
+    container_name: sales-desk-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=salesdesk
+      - POSTGRES_USER=salesdesk
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-salesdesk123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
+  # Optional: Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: sales-desk-cache
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:
+  redis_data:
