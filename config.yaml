@@ -206,3 +206,5 @@ settings:
 
   # Automation
   auto_send_when_approved: false
+  # Dry-run mode: don't actually send emails; only log intents
+  dry_run: false

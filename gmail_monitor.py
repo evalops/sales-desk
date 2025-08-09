@@ -93,6 +93,12 @@ class GmailMonitor:
     def send_response(self, response: Dict, recipient_email: str) -> bool:
         """Send the response email"""
         try:
+            # Honor dry-run setting
+            dry_run = bool(self.config.get("settings", {}).get("dry_run", False))
+            if dry_run:
+                self.logger.info(f"[DRY-RUN] Would send response to {recipient_email}")
+                return True
+
             if response.get("response_message"):
                 result = self.gmail.send_email(
                     to=recipient_email,
@@ -209,8 +215,10 @@ class GmailMonitor:
                 self.logger.info("✅ Ready for automated response")
                 try:
                     auto_send = bool(self.config.get("settings", {}).get("auto_send_when_approved", False))
+                    dry_run = bool(self.config.get("settings", {}).get("dry_run", False))
                 except Exception:
                     auto_send = False
+                    dry_run = False
                 if auto_send:
                     # Extract recipient from processed message; best-effort
                     recipient = ""
@@ -221,8 +229,11 @@ class GmailMonitor:
                     except Exception:
                         recipient = ""
                     if recipient:
-                        sent = self.send_response(response, recipient)
-                        self.logger.info(f"📤 Auto-sent response to {recipient}: {'ok' if sent else 'failed'}")
+                        if dry_run:
+                            self.logger.info(f"[DRY-RUN] Would auto-send response to {recipient}")
+                        else:
+                            sent = self.send_response(response, recipient)
+                            self.logger.info(f"📤 Auto-sent response to {recipient}: {'ok' if sent else 'failed'}")
             elif response.get("requires_human_review"):
                 self.logger.warning(f"⚠️ Requires human review: {response.get('routing_reason')}")
         
