@@ -6,7 +6,7 @@ import os
 import yaml
 import logging
 import time
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TypedDict
 from functools import wraps
 from datetime import datetime
 import json
@@ -55,7 +55,8 @@ def load_config(config_path: str = "config.yaml") -> Dict:
         }
     
     with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+        return data if isinstance(data, dict) else {}
 
 def retry_with_backoff(max_retries: int = 3, initial_delay: float = 1.0, backoff_factor: float = 2.0):
     """Decorator for retrying functions with exponential backoff"""
@@ -77,7 +78,9 @@ def retry_with_backoff(max_retries: int = 3, initial_delay: float = 1.0, backoff
                     else:
                         logging.error(f"All {max_retries} attempts failed. Last error: {e}")
             
-            raise last_exception
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("Operation failed with no exception captured")
         
         return wrapper
     return decorator
@@ -128,19 +131,29 @@ class AuditLogger:
             'reason': reason
         }))
 
+class MetricsData(TypedDict):
+    total_requests: int
+    approved_requests: int
+    denied_requests: int
+    escalations: int
+    artifacts_shared: Dict[str, int]
+    response_times: List[float]
+    error_count: int
+
+
 class MetricsCollector:
     """Collect metrics for monitoring and analytics"""
     
     def __init__(self):
-        self.metrics = {
-            'total_requests': 0,
-            'approved_requests': 0,
-            'denied_requests': 0,
-            'escalations': 0,
-            'artifacts_shared': {},
-            'response_times': [],
-            'error_count': 0
-        }
+        self.metrics: MetricsData = MetricsData(
+            total_requests=0,
+            approved_requests=0,
+            denied_requests=0,
+            escalations=0,
+            artifacts_shared={},
+            response_times=[],
+            error_count=0,
+        )
     
     def record_request(self, approved: bool, escalated: bool, 
                       artifacts: List[str], response_time: float):
@@ -156,8 +169,9 @@ class MetricsCollector:
             self.metrics['escalations'] += 1
         
         for artifact in artifacts:
-            self.metrics['artifacts_shared'][artifact] = \
+            self.metrics['artifacts_shared'][artifact] = (
                 self.metrics['artifacts_shared'].get(artifact, 0) + 1
+            )
         
         self.metrics['response_times'].append(response_time)
     
@@ -287,8 +301,14 @@ class RedisStateStore(StateStore):
         return f"{self.ns}:{kind}:{ident}"
 
     def get_last_history_id(self) -> Optional[str]:
-        val = self.redis.get(self._key("last_history_id", "value"))
-        return val.decode() if val else None
+        val: Any = self.redis.get(self._key("last_history_id", "value"))
+        if val is None:
+            return None
+        try:
+            # pyrefly: ignore  # missing-attribute
+            return val.decode()  # bytes -> str
+        except Exception:
+            return str(val)
 
     def set_last_history_id(self, history_id: str) -> None:
         self.redis.set(self._key("last_history_id", "value"), history_id)

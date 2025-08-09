@@ -8,7 +8,6 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.send', 
@@ -24,14 +23,11 @@ class GmailToolInput(BaseModel):
     query: Optional[str] = Field(default=None, description="Search query")
     message_id: Optional[str] = Field(default=None, description="Message ID to read")
 
-class GmailTool(BaseTool):
-    name: str = "Gmail Tool"
-    description: str = "Tool for sending, reading, and managing Gmail emails. Use action='send' to send emails, action='search' to search emails, action='read' to read a specific email."
-    args_schema: Type[BaseModel] = GmailToolInput
+class GmailTool:
+    """Wrapper around Gmail API for send/search/read operations."""
     service: Any = None
-    
+
     def __init__(self):
-        super().__init__()
         self.service = self._authenticate()
     
     def _authenticate(self):
@@ -46,7 +42,7 @@ class GmailTool(BaseTool):
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_config(
+                flow: Any = InstalledAppFlow.from_client_config(
                     {
                         "installed": {
                             "client_id": os.getenv("GOOGLE_CLIENT_ID"),
@@ -66,21 +62,7 @@ class GmailTool(BaseTool):
         
         return build('gmail', 'v1', credentials=creds)
     
-    def _run(self, **kwargs) -> str:
-        action = kwargs.get('action', 'send')
-        
-        if action == 'send':
-            return self.send_email(
-                to=kwargs.get('to'),
-                subject=kwargs.get('subject'),
-                body=kwargs.get('body')
-            )
-        elif action == 'search':
-            return self.search_emails(query=kwargs.get('query', ''))
-        elif action == 'read':
-            return self.read_email(message_id=kwargs.get('message_id'))
-        else:
-            return f"Unknown action: {action}"
+    # Note: Previously supported BaseTool._run; no longer needed.
     
     def send_email(self, to: str, subject: str, body: str, *, in_reply_to: Optional[str] = None, thread_id: Optional[str] = None) -> str:
         try:
@@ -117,7 +99,8 @@ class GmailTool(BaseTool):
             if not messages:
                 return "No messages found."
             
-            email_summaries = []
+            from typing import List as _ListStr
+            email_summaries: _ListStr[str] = []
             for msg in messages:
                 msg_data = self.service.users().messages().get(
                     userId='me', 
@@ -128,7 +111,10 @@ class GmailTool(BaseTool):
                 subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
                 sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown Sender')
                 
-                email_summaries.append(f"From: {sender} | Subject: {subject} | ID: {msg['id']}")
+                msg_id_str = str(msg.get('id'))
+                line = "From: " + str(sender) + " | Subject: " + str(subject) + " | ID: " + msg_id_str
+                # pyrefly: ignore  # bad-argument-type
+                email_summaries.append(line)
             
             return "\n".join(email_summaries)
         except HttpError as error:

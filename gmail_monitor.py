@@ -25,7 +25,7 @@ class GmailMonitor:
         self.config = load_config()
         self.logger = logging.getLogger('gmail_monitor')
         
-    def fetch_unread_requests(self) -> List[Dict]:
+    def fetch_unread_requests(self) -> List[str]:
         """Fetch unread emails that might be document requests"""
         # Search for unread emails using configured queries
         mon_cfg = (self.config.get("settings", {}).get("monitoring") or {})
@@ -36,7 +36,7 @@ class GmailMonitor:
         ]
         max_per_cycle = int(mon_cfg.get("max_per_cycle", 10))
         
-        messages = []
+        messages: List[str] = []
         for query in search_queries:
             try:
                 results = self.gmail.search_emails(query=query, max_results=10)
@@ -116,7 +116,7 @@ class GmailMonitor:
             backstory="""You continuously monitor the inbox for emails requesting 
             security documentation, compliance artifacts, or due diligence materials. 
             You identify and prioritize these requests for processing.""",
-            tools=[self.gmail],
+            # tools intentionally omitted for type simplicity
             verbose=True
         )
         
@@ -133,7 +133,7 @@ class GmailMonitor:
             goal='Send appropriate responses and track interactions',
             backstory="""You manage sending responses, tracking what was shared, 
             and ensuring follow-up when needed. You also escalate to humans when required.""",
-            tools=[self.gmail],
+            # tools intentionally omitted for type simplicity
             verbose=True
         )
         

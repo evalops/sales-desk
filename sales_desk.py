@@ -255,7 +255,7 @@ class SalesDesk:
         response += f"Best regards,\n{signature}"
         return response
     
-    def process_request(self, email_data: Dict[str, str]) -> Dict[str, Any]:
+    def process_request(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
         """Main processing function"""
         sender_email = email_data.get("from", "")
         sender_name = sender_email.split("<")[0].strip() if "<" in sender_email else "there"
@@ -280,7 +280,10 @@ class SalesDesk:
         # Determine if human review needed (configurable)
         escal_cfg = (self.config.get("settings", {}).get("escalation") or {})
         max_sensitive_without_nda = int(escal_cfg.get("max_sensitive_without_nda", 2))
-        human_keywords = [k.lower() for k in (escal_cfg.get("human_review_keywords") or [])]
+        kw_list = escal_cfg.get("human_review_keywords")
+        if not isinstance(kw_list, list):
+            kw_list = []
+        human_keywords = [str(k).lower() for k in kw_list]
 
         body_lower = body.lower()
         keyword_hit = any(k in body_lower for k in human_keywords)

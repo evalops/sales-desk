@@ -9,6 +9,7 @@ import sys
 import json
 import argparse
 from datetime import datetime
+from typing import Any, Dict, List
 import logging
 from typing import Dict, Optional
 from sales_desk import SalesDesk
@@ -23,7 +24,7 @@ def test_request_processing():
     """Test the Sales Desk with sample requests"""
     logger.info("TESTING SALES DESK REQUEST PROCESSING")
     
-    test_cases = [
+    test_cases: List[Dict[str, Any]] = [
         {
             "name": "SOC2 Request (No NDA)",
             "email": {
