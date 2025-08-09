@@ -11,6 +11,7 @@ import asyncio
 from typing import Dict, Optional
 from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Header
+from contextlib import asynccontextmanager
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sales_desk import SalesDesk
@@ -28,11 +29,24 @@ from utils import (
 import jwt
 import logging
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Sales Desk Webhook Server starting...")
+    try:
+        state_store.set_last_history_id("0")
+        _ = state_store.get_last_history_id()
+        logger.info("Persistence backend validated")
+    except Exception as e:
+        logger.warning(f"Persistence validation failed: {e}")
+    yield
+    logger.info("Sales Desk Webhook Server shutting down...")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Sales Desk Webhook API",
     description="Real-time processing of security document requests",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Initialize components
@@ -367,27 +381,7 @@ async def internal_error(request: Request, exc):
         content={"error": "Internal server error"}
     )
 
-# Startup and shutdown events
-# pyrefly: ignore  # deprecated
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup"""
-    logger.info("Sales Desk Webhook Server starting...")
-    # Validate persistence backend health
-    try:
-        # Write-read cycle for last_history_id
-        state_store.set_last_history_id("0")
-        _ = state_store.get_last_history_id()
-        logger.info("Persistence backend validated")
-    except Exception as e:
-        logger.warning(f"Persistence validation failed: {e}")
-
-# pyrefly: ignore  # deprecated
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    logger.info("Sales Desk Webhook Server shutting down...")
-    # Close database connections, save metrics, etc.
+"""Startup/shutdown handled via lifespan above."""
 
 if __name__ == "__main__":
     import uvicorn
