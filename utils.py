@@ -222,3 +222,175 @@ def generate_secure_link(artifact_id: str, recipient: str, expiration_days: int 
     token = base64.urlsafe_b64encode(hash_value).decode()[:32]
     
     return f"https://secure.yourcompany.com/docs/{token}"
+
+
+# Persistence for webhook idempotency and history tracking
+
+class StateStore:
+    """Interface for storing webhook processing state."""
+
+    def get_last_history_id(self) -> Optional[str]:
+        raise NotImplementedError
+
+    def set_last_history_id(self, history_id: str) -> None:
+        raise NotImplementedError
+
+    def is_processed_history(self, history_id: str) -> bool:
+        raise NotImplementedError
+
+    def mark_processed_history(self, history_id: str) -> None:
+        raise NotImplementedError
+
+    def is_processed_message(self, message_id: str) -> bool:
+        raise NotImplementedError
+
+    def mark_processed_message(self, message_id: str) -> None:
+        raise NotImplementedError
+
+
+class MemoryStateStore(StateStore):
+    def __init__(self):
+        self._last_history_id: Optional[str] = None
+        self._processed_history: set[str] = set()
+        self._processed_messages: set[str] = set()
+
+    def get_last_history_id(self) -> Optional[str]:
+        return self._last_history_id
+
+    def set_last_history_id(self, history_id: str) -> None:
+        self._last_history_id = history_id
+
+    def is_processed_history(self, history_id: str) -> bool:
+        return history_id in self._processed_history
+
+    def mark_processed_history(self, history_id: str) -> None:
+        self._processed_history.add(history_id)
+
+    def is_processed_message(self, message_id: str) -> bool:
+        return message_id in self._processed_messages
+
+    def mark_processed_message(self, message_id: str) -> None:
+        self._processed_messages.add(message_id)
+
+
+class RedisStateStore(StateStore):
+    def __init__(self, url: str, ttl_days: int = 7, namespace: str = "salesdesk"):
+        try:
+            import redis  # type: ignore
+        except Exception as e:
+            raise RuntimeError("redis is not installed. Install requirements-full.txt") from e
+        self.redis = redis.Redis.from_url(url)
+        self.ttl_seconds = int(ttl_days * 24 * 3600)
+        self.ns = namespace
+
+    def _key(self, kind: str, ident: str) -> str:
+        return f"{self.ns}:{kind}:{ident}"
+
+    def get_last_history_id(self) -> Optional[str]:
+        val = self.redis.get(self._key("last_history_id", "value"))
+        return val.decode() if val else None
+
+    def set_last_history_id(self, history_id: str) -> None:
+        self.redis.set(self._key("last_history_id", "value"), history_id)
+
+    def is_processed_history(self, history_id: str) -> bool:
+        return self.redis.exists(self._key("processed_history", history_id)) == 1
+
+    def mark_processed_history(self, history_id: str) -> None:
+        self.redis.set(self._key("processed_history", history_id), "1", ex=self.ttl_seconds)
+
+    def is_processed_message(self, message_id: str) -> bool:
+        return self.redis.exists(self._key("processed_message", message_id)) == 1
+
+    def mark_processed_message(self, message_id: str) -> None:
+        self.redis.set(self._key("processed_message", message_id), "1", ex=self.ttl_seconds)
+
+
+class PostgresStateStore(StateStore):
+    def __init__(self, dsn: str):
+        try:
+            import psycopg2  # type: ignore
+        except Exception as e:
+            raise RuntimeError("psycopg2-binary is not installed. Install requirements-full.txt") from e
+        self.psycopg2 = psycopg2
+        self.dsn = dsn
+        self._ensure_tables()
+
+    def _conn(self):
+        return self.psycopg2.connect(self.dsn)
+
+    def _ensure_tables(self):
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS webhook_state (
+                    id SMALLINT PRIMARY KEY DEFAULT 1,
+                    last_history_id TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS processed_events (
+                    id TEXT PRIMARY KEY,
+                    type TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+            conn.commit()
+
+    def get_last_history_id(self) -> Optional[str]:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT last_history_id FROM webhook_state WHERE id=1")
+            row = cur.fetchone()
+            return row[0] if row and row[0] else None
+
+    def set_last_history_id(self, history_id: str) -> None:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO webhook_state (id, last_history_id) VALUES (1, %s)\n"
+                "ON CONFLICT (id) DO UPDATE SET last_history_id=EXCLUDED.last_history_id, updated_at=CURRENT_TIMESTAMP",
+                (history_id,),
+            )
+            conn.commit()
+
+    def _is_processed(self, ident: str) -> bool:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM processed_events WHERE id=%s", (ident,))
+            return cur.fetchone() is not None
+
+    def _mark_processed(self, ident: str, typ: str) -> None:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO processed_events (id, type) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (ident, typ),
+            )
+            conn.commit()
+
+    def is_processed_history(self, history_id: str) -> bool:
+        return self._is_processed(f"history:{history_id}")
+
+    def mark_processed_history(self, history_id: str) -> None:
+        self._mark_processed(f"history:{history_id}", "history")
+
+    def is_processed_message(self, message_id: str) -> bool:
+        return self._is_processed(f"message:{message_id}")
+
+    def mark_processed_message(self, message_id: str) -> None:
+        self._mark_processed(f"message:{message_id}", "message")
+
+
+def get_state_store(config: Dict[str, Any]) -> StateStore:
+    """Factory for StateStore based on config settings.persistence."""
+    settings = config.get("settings", {})
+    p = (settings.get("persistence") or {})
+    backend = (p.get("backend") or os.getenv("PERSISTENCE_BACKEND") or "memory").lower()
+    if backend == "redis":
+        url = p.get("redis_url") or os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+        ttl_days = int(p.get("ttl_days", 7))
+        return RedisStateStore(url=url, ttl_days=ttl_days)
+    if backend == "postgres":
+        dsn = os.getenv("DATABASE_URL") or p.get("database_url")
+        if not dsn:
+            raise RuntimeError("DATABASE_URL not set for Postgres persistence")
+        return PostgresStateStore(dsn)
+    # Default
+    return MemoryStateStore()

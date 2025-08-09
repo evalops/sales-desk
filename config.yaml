@@ -197,3 +197,9 @@ settings:
     level: "INFO"  # DEBUG, INFO, WARNING, ERROR
     file: "sales_desk.log"
     format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+  # Persistence (for webhook idempotency/history)
+  persistence:
+    backend: memory  # memory | redis | postgres
+    redis_url: "redis://localhost:6379/0"
+    ttl_days: 7

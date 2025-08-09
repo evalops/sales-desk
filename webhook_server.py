@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sales_desk import SalesDesk
 from gmail_tool import GmailTool
-from utils import setup_logging, AuditLogger, MetricsCollector, retry_with_backoff
+from utils import setup_logging, AuditLogger, MetricsCollector, retry_with_backoff, load_config, get_state_store
 import logging
 
 # Initialize FastAPI app
@@ -32,10 +32,9 @@ metrics = MetricsCollector()
 sales_desk = SalesDesk()
 gmail_tool = GmailTool()
 
-# In-memory idempotency + history tracking (consider DB in production)
-processed_history_ids = set()
-processed_message_ids = set()
-last_history_id: Optional[str] = None
+# Persistence-backed idempotency + history tracking
+CONFIG = load_config()
+state_store = get_state_store(CONFIG)
 
 # Request models
 class GmailNotification(BaseModel):
@@ -104,9 +103,9 @@ async def gmail_webhook(
                 raise HTTPException(status_code=400, detail="Missing historyId")
 
             # Idempotency: ignore duplicate history IDs
-            if history_id in processed_history_ids:
+            if state_store.is_processed_history(str(history_id)):
                 return {"status": "ignored", "message": "Duplicate historyId"}
-            processed_history_ids.add(history_id)
+            state_store.mark_processed_history(str(history_id))
             
             # Process in background
             background_tasks.add_task(
@@ -193,10 +192,9 @@ async def get_request_status(request_id: str):
 async def process_new_emails(email_address: str, history_id: str):
     """Process new emails in background"""
     try:
-        global last_history_id
         logger.info(f"Processing new emails for {email_address} since {history_id}")
 
-        start_from = last_history_id or history_id
+        start_from = state_store.get_last_history_id() or history_id
         new_ids = gmail_tool.list_history_new_message_ids(str(start_from), max_pages=5)
         if not new_ids:
             logger.info("No new message IDs from history API; falling back to search")
@@ -205,9 +203,9 @@ async def process_new_emails(email_address: str, history_id: str):
             new_ids = [ln.split('ID:')[-1].strip() for ln in lines if 'ID:' in ln]
 
         for mid in new_ids:
-            if mid in processed_message_ids:
+            if state_store.is_processed_message(mid):
                 continue
-            processed_message_ids.add(mid)
+            state_store.mark_processed_message(mid)
             try:
                 details = gmail_tool.read_email_details(mid)
                 if 'error' in details:
@@ -238,7 +236,7 @@ async def process_new_emails(email_address: str, history_id: str):
                 logger.error(f"Error processing message {mid}: {e}")
                 metrics.record_error()
 
-        last_history_id = history_id
+        state_store.set_last_history_id(str(history_id))
         
     except Exception as e:
         logger.error(f"Background processing error: {e}")
