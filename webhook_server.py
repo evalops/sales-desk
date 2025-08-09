@@ -10,7 +10,7 @@ import base64
 import asyncio
 from typing import Dict, Optional
 from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sales_desk import SalesDesk
@@ -31,6 +31,11 @@ audit_logger = AuditLogger()
 metrics = MetricsCollector()
 sales_desk = SalesDesk()
 gmail_tool = GmailTool()
+
+# In-memory idempotency + history tracking (consider DB in production)
+processed_history_ids = set()
+processed_message_ids = set()
+last_history_id: Optional[str] = None
 
 # Request models
 class GmailNotification(BaseModel):
@@ -65,19 +70,28 @@ async def get_metrics():
 @app.post("/webhook/gmail")
 async def gmail_webhook(
     request: Request,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    x_webhook_secret: Optional[str] = Header(default=None, alias="x-webhook-secret"),
 ):
     """
     Receive Gmail push notifications
     Requires setting up Gmail Push Notifications API
     """
     try:
+        # Validate shared secret if configured
+        expected_secret = os.getenv("WEBHOOK_SHARED_SECRET")
+        if expected_secret and x_webhook_secret != expected_secret:
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
         # Parse the notification
         body = await request.json()
         
         # Decode the message
         if 'message' in body and 'data' in body['message']:
-            data = base64.b64decode(body['message']['data']).decode('utf-8')
+            try:
+                data = base64.b64decode(body['message']['data']).decode('utf-8')
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid base64 data")
             notification = json.loads(data)
             
             # Extract email ID
@@ -85,6 +99,14 @@ async def gmail_webhook(
             history_id = notification.get('historyId')
             
             logger.info(f"Received Gmail notification for {email_id}, history: {history_id}")
+            
+            if not history_id:
+                raise HTTPException(status_code=400, detail="Missing historyId")
+
+            # Idempotency: ignore duplicate history IDs
+            if history_id in processed_history_ids:
+                return {"status": "ignored", "message": "Duplicate historyId"}
+            processed_history_ids.add(history_id)
             
             # Process in background
             background_tasks.add_task(
@@ -171,18 +193,52 @@ async def get_request_status(request_id: str):
 async def process_new_emails(email_address: str, history_id: str):
     """Process new emails in background"""
     try:
-        # Fetch new messages since history_id
-        # This would use Gmail History API
+        global last_history_id
         logger.info(f"Processing new emails for {email_address} since {history_id}")
-        
-        # For now, just search for recent unread
-        results = gmail_tool.search_emails(
-            query=f"is:unread to:{email_address}",
-            max_results=5
-        )
-        
-        # Process each message
-        # ... processing logic ...
+
+        start_from = last_history_id or history_id
+        new_ids = gmail_tool.list_history_new_message_ids(str(start_from), max_pages=5)
+        if not new_ids:
+            logger.info("No new message IDs from history API; falling back to search")
+            results = gmail_tool.search_emails(query="is:unread", max_results=5)
+            lines = results.split("\n") if isinstance(results, str) else []
+            new_ids = [ln.split('ID:')[-1].strip() for ln in lines if 'ID:' in ln]
+
+        for mid in new_ids:
+            if mid in processed_message_ids:
+                continue
+            processed_message_ids.add(mid)
+            try:
+                details = gmail_tool.read_email_details(mid)
+                if 'error' in details:
+                    raise RuntimeError(details['error'])
+                email_data = {
+                    "from": details.get("from", ""),
+                    "subject": details.get("subject", ""),
+                    "body": details.get("body", ""),
+                }
+                start = datetime.now()
+                resp = sales_desk.process_request(email_data)
+                metrics.record_request(
+                    approved=len(resp['approved_artifacts']) > 0,
+                    escalated=resp['requires_human_review'],
+                    artifacts=resp['approved_artifacts'],
+                    response_time=(datetime.now() - start).total_seconds(),
+                )
+                audit_logger.log_request(
+                    email_data.get('from',''),
+                    resp['detected_artifacts'],
+                    resp['approved_artifacts'],
+                    resp['denied_artifacts'],
+                )
+                # Optionally auto-send could be gated by config; here we only log readiness
+                if not resp['requires_human_review'] and resp['approved_artifacts']:
+                    logger.info(f"Ready to send response for message {mid}")
+            except Exception as e:
+                logger.error(f"Error processing message {mid}: {e}")
+                metrics.record_error()
+
+        last_history_id = history_id
         
     except Exception as e:
         logger.error(f"Background processing error: {e}")

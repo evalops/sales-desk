@@ -2,6 +2,7 @@ import os
 import base64
 import pickle
 from typing import List, Dict, Optional, Type, Any
+from email.message import EmailMessage
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -81,20 +82,27 @@ class GmailTool(BaseTool):
         else:
             return f"Unknown action: {action}"
     
-    def send_email(self, to: str, subject: str, body: str) -> str:
+    def send_email(self, to: str, subject: str, body: str, *, in_reply_to: Optional[str] = None, thread_id: Optional[str] = None) -> str:
         try:
-            message = self._create_message(to, subject, body)
-            sent_message = self.service.users().messages().send(
-                userId='me', 
-                body=message
-            ).execute()
+            message = self._create_message(to, subject, body, in_reply_to=in_reply_to)
+            payload: Dict[str, Any] = {'raw': message['raw']}
+            if thread_id:
+                payload['threadId'] = thread_id
+            sent_message = self.service.users().messages().send(userId='me', body=payload).execute()
             return f"Email sent successfully! Message ID: {sent_message['id']}"
         except HttpError as error:
             return f"An error occurred: {error}"
     
-    def _create_message(self, to: str, subject: str, body: str) -> Dict:
-        message_text = f"To: {to}\nSubject: {subject}\n\n{body}"
-        encoded_message = base64.urlsafe_b64encode(message_text.encode()).decode()
+    def _create_message(self, to: str, subject: str, body: str, in_reply_to: Optional[str] = None) -> Dict:
+        msg = EmailMessage()
+        msg['To'] = to
+        msg['Subject'] = subject
+        # From is set automatically by Gmail API for the authenticated user
+        if in_reply_to:
+            msg['In-Reply-To'] = in_reply_to
+            msg['References'] = in_reply_to
+        msg.set_content(body)
+        encoded_message = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         return {'raw': encoded_message}
     
     def search_emails(self, query: str, max_results: int = 10) -> str:
@@ -158,3 +166,51 @@ class GmailTool(BaseTool):
             body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
         
         return body or "No body content found"
+
+    def read_email_details(self, message_id: str) -> Dict[str, Any]:
+        """Return structured details including threadId for threading replies."""
+        try:
+            message = self.service.users().messages().get(userId='me', id=message_id).execute()
+            payload = message.get('payload', {})
+            headers = payload.get('headers', [])
+            get_h = lambda n: next((h['value'] for h in headers if h.get('name') == n), None)
+            details = {
+                'from': get_h('From') or 'Unknown Sender',
+                'subject': get_h('Subject') or 'No Subject',
+                'date': get_h('Date') or 'Unknown Date',
+                'body': self._get_message_body(payload),
+                'thread_id': message.get('threadId'),
+            }
+            return details
+        except HttpError as error:
+            return {'error': str(error)}
+
+    def list_history_new_message_ids(self, start_history_id: str, max_pages: int = 1) -> List[str]:
+        """List message IDs added since the given history ID.
+
+        Returns a list of message IDs for messagesAdded events. Paginates up to max_pages.
+        """
+        try:
+            user_id = 'me'
+            page_token = None
+            collected: List[str] = []
+            pages = 0
+            while True:
+                req = self.service.users().history().list(
+                    userId=user_id,
+                    startHistoryId=start_history_id,
+                    pageToken=page_token
+                )
+                resp = req.execute()
+                for h in resp.get('history', []):
+                    for m in h.get('messagesAdded', []) or []:
+                        mid = m.get('message', {}).get('id')
+                        if mid:
+                            collected.append(mid)
+                page_token = resp.get('nextPageToken')
+                pages += 1
+                if not page_token or pages >= max_pages:
+                    break
+            return collected
+        except HttpError as error:
+            return []

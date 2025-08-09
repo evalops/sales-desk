@@ -9,18 +9,19 @@ import sys
 import json
 import argparse
 from datetime import datetime
+import logging
 from typing import Dict, Optional
 from sales_desk import SalesDesk
 from gmail_monitor import GmailMonitor
 from dotenv import load_dotenv
+from utils import setup_logging
 
 load_dotenv()
+logger = setup_logging()
 
 def test_request_processing():
     """Test the Sales Desk with sample requests"""
-    print("\n" + "="*60)
-    print("TESTING SALES DESK REQUEST PROCESSING")
-    print("="*60)
+    logger.info("TESTING SALES DESK REQUEST PROCESSING")
     
     test_cases = [
         {
@@ -52,86 +53,73 @@ def test_request_processing():
     sales_desk = SalesDesk()
     
     for test_case in test_cases:
-        print(f"\n📧 Test Case: {test_case['name']}")
-        print("-" * 40)
-        print(f"From: {test_case['email']['from']}")
-        print(f"Subject: {test_case['email']['subject']}")
-        print(f"Body: {test_case['email']['body'][:100]}...")
+        logger.info(f"Test Case: {test_case['name']}")
+        logger.info(f"From: {test_case['email']['from']}")
+        logger.info(f"Subject: {test_case['email']['subject']}")
+        logger.info(f"Body: {test_case['email']['body'][:100]}...")
         
         response = sales_desk.process_request(test_case['email'])
         
-        print("\n📊 Response JSON:")
-        print(json.dumps(response, indent=2))
-        
-        print("\n✉️ Email Response:")
-        print(response['response_message'])
-        print("-" * 40)
+        logger.info("Response JSON:\n" + json.dumps(response, indent=2))
+        logger.info("Email Response:\n" + response['response_message'])
 
 def monitor_inbox(interval: int = 60, test_mode: bool = False):
     """Monitor Gmail inbox for security document requests"""
-    print("\n" + "="*60)
-    print("GMAIL MONITORING MODE")
-    print("="*60)
+    logger.info("GMAIL MONITORING MODE")
     
     monitor = GmailMonitor()
     
     if test_mode:
-        print("\n🔍 Running single monitoring cycle...")
+        logger.info("Running single monitoring cycle...")
         responses = monitor.run_monitoring_cycle()
         
         if responses:
-            print("\n📊 Processing Summary:")
+            logger.info("Processing Summary:")
             for resp in responses:
                 if "error" not in resp:
-                    print(f"\n• Message ID: {resp.get('message_id')}")
-                    print(f"  Detected: {resp.get('detected_artifacts')}")
-                    print(f"  Approved: {resp.get('approved_artifacts')}")
-                    print(f"  Needs Review: {resp.get('requires_human_review')}")
+                    logger.info(f"• Message ID: {resp.get('message_id')}")
+                    logger.info(f"  Detected: {resp.get('detected_artifacts')}")
+                    logger.info(f"  Approved: {resp.get('approved_artifacts')}")
+                    logger.info(f"  Needs Review: {resp.get('requires_human_review')}")
     else:
-        print(f"\n🔄 Starting continuous monitoring (every {interval} seconds)")
-        print("Press Ctrl+C to stop")
+        logger.info(f"Starting continuous monitoring (every {interval} seconds)")
+        logger.info("Press Ctrl+C to stop")
         monitor.start_continuous_monitoring(interval_seconds=interval)
 
 def process_single_email(message_id: str):
     """Process a specific email by message ID"""
-    print("\n" + "="*60)
-    print(f"PROCESSING EMAIL: {message_id}")
-    print("="*60)
+    logger.info(f"PROCESSING EMAIL: {message_id}")
     
     monitor = GmailMonitor()
     response = monitor.process_message(message_id)
     
-    print("\n📊 Response:")
-    print(json.dumps(response, indent=2))
+    logger.info("Response:\n" + json.dumps(response, indent=2))
     
     if response.get("response_message"):
-        print("\n✉️ Generated Response:")
-        print(response["response_message"])
+        logger.info("Generated Response:\n" + response["response_message"])
     
     return response
 
 def show_status():
     """Show system status and configuration"""
-    print("\n" + "="*60)
-    print("SALES DESK STATUS")
-    print("="*60)
+    logger.info("SALES DESK STATUS")
     
     sales_desk = SalesDesk()
     
-    print("\n📚 Available Artifacts:")
+    logger.info("Available Artifacts:")
     from sales_desk import ARTIFACT_CATALOG
     for artifact_id, details in ARTIFACT_CATALOG.items():
         nda_req = "🔒 NDA Required" if details["requires_nda"] else "✅ No NDA"
-        print(f"  • {details['name']}: {nda_req}")
+        logger.info(f"  • {details['name']}: {nda_req}")
     
-    print("\n🔐 NDA Database:")
+    logger.info("NDA Database:")
     for email, has_nda in sales_desk.nda_database.items():
         status = "✅ On file" if has_nda else "❌ Not on file"
-        print(f"  • {email}: {status}")
+        logger.info(f"  • {email}: {status}")
     
-    print("\n⚙️ Configuration:")
-    print(f"  • Gmail API: {'✅ Configured' if os.getenv('GOOGLE_CLIENT_ID') else '❌ Not configured'}")
-    print(f"  • OpenAI API: {'✅ Configured' if os.getenv('OPENAI_API_KEY') else '❌ Not configured'}")
+    logger.info("Configuration:")
+    logger.info(f"  • Gmail API: {'✅ Configured' if os.getenv('GOOGLE_CLIENT_ID') else '❌ Not configured'}")
+    logger.info(f"  • OpenAI API: {'✅ Configured' if os.getenv('OPENAI_API_KEY') else '❌ Not configured'}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -172,8 +160,8 @@ Examples:
         parser.print_help()
         sys.exit(1)
     
-    print("\n🤖 Sales Desk - Inbound Document Request Handler")
-    print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("🤖 Sales Desk - Inbound Document Request Handler")
+    logger.info(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     try:
         if args.command == 'test':
@@ -185,9 +173,9 @@ Examples:
         elif args.command == 'status':
             show_status()
     except KeyboardInterrupt:
-        print("\n\n👋 Sales Desk shutting down gracefully...")
+        logger.info("👋 Sales Desk shutting down gracefully...")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        logger.error(f"❌ Error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

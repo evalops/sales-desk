@@ -12,6 +12,8 @@ from gmail_tool import GmailTool
 from sales_desk import SalesDesk
 from crewai import Agent, Task, Crew, Process
 from dotenv import load_dotenv
+from utils import load_config
+import logging
 
 load_dotenv()
 
@@ -20,15 +22,19 @@ class GmailMonitor:
         self.gmail = GmailTool()
         self.sales_desk = SalesDesk()
         self.processed_messages = set()
+        self.config = load_config()
+        self.logger = logging.getLogger('gmail_monitor')
         
     def fetch_unread_requests(self) -> List[Dict]:
         """Fetch unread emails that might be document requests"""
-        # Search for unread emails with keywords
-        search_queries = [
+        # Search for unread emails using configured queries
+        mon_cfg = (self.config.get("settings", {}).get("monitoring") or {})
+        search_queries = mon_cfg.get("search_queries") or [
             "is:unread (soc2 OR soc 2 OR security OR compliance OR audit OR questionnaire OR pentest OR iso27001)",
             "is:unread subject:(security documentation OR due diligence OR vendor assessment)",
             "is:unread (DPA OR NDA OR insurance certificate)"
         ]
+        max_per_cycle = int(mon_cfg.get("max_per_cycle", 10))
         
         messages = []
         for query in search_queries:
@@ -41,38 +47,34 @@ class GmailMonitor:
                             msg_id = line.split('ID:')[1].strip()
                             if msg_id not in self.processed_messages:
                                 messages.append(msg_id)
+                                if len(messages) >= max_per_cycle:
+                                    break
+                if len(messages) >= max_per_cycle:
+                    break
             except Exception as e:
-                print(f"Error searching emails: {e}")
+                self.logger.error(f"Error searching emails: {e}")
         
         return messages
     
     def process_message(self, message_id: str) -> Dict:
         """Process a single message through Sales Desk"""
         try:
-            # Read the full email
-            email_content = self.gmail.read_email(message_id)
-            
-            # Parse email content
-            lines = email_content.split('\n')
+            details = self.gmail.read_email_details(message_id)
+            if 'error' in details:
+                raise RuntimeError(details['error'])
             email_data = {
-                "from": "",
-                "subject": "",
-                "body": "",
-                "message_id": message_id
+                "from": details.get("from", ""),
+                "subject": details.get("subject", ""),
+                "body": details.get("body", ""),
+                "message_id": message_id,
+                "thread_id": details.get("thread_id"),
             }
-            
-            for i, line in enumerate(lines):
-                if line.startswith("From:"):
-                    email_data["from"] = line.replace("From:", "").strip()
-                elif line.startswith("Subject:"):
-                    email_data["subject"] = line.replace("Subject:", "").strip()
-                elif line.startswith("Body:"):
-                    email_data["body"] = '\n'.join(lines[i+1:])
-                    break
             
             # Process through Sales Desk
             response = self.sales_desk.process_request(email_data)
             response["message_id"] = message_id
+            if email_data.get('thread_id'):
+                response['thread_id'] = email_data['thread_id']
             
             # Mark as processed
             self.processed_messages.add(message_id)
@@ -80,7 +82,7 @@ class GmailMonitor:
             return response
             
         except Exception as e:
-            print(f"Error processing message {message_id}: {e}")
+            self.logger.error(f"Error processing message {message_id}: {e}")
             return {
                 "error": str(e),
                 "message_id": message_id,
@@ -95,12 +97,14 @@ class GmailMonitor:
                 result = self.gmail.send_email(
                     to=recipient_email,
                     subject=f"Re: Security Documentation Request",
-                    body=response["response_message"]
+                    body=response["response_message"],
+                    in_reply_to=response.get("message_id"),
+                    thread_id=response.get("thread_id"),
                 )
                 return "successfully" in result.lower()
             return False
         except Exception as e:
-            print(f"Error sending response: {e}")
+            self.logger.error(f"Error sending response: {e}")
             return False
     
     def create_monitoring_crew(self):
@@ -179,71 +183,66 @@ class GmailMonitor:
     
     def run_monitoring_cycle(self):
         """Run a single monitoring cycle"""
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Checking for new requests...")
+        self.logger.info(f"Checking for new requests...")
         
         # Fetch unread requests
         message_ids = self.fetch_unread_requests()
         
         if not message_ids:
-            print("No new security document requests found.")
+            self.logger.info("No new security document requests found.")
             return
         
-        print(f"Found {len(message_ids)} potential requests to process")
+        self.logger.info(f"Found {len(message_ids)} potential requests to process")
         
         # Process each message
         responses = []
         for msg_id in message_ids:
-            print(f"\nProcessing message: {msg_id}")
+            self.logger.info(f"Processing message: {msg_id}")
             response = self.process_message(msg_id)
             responses.append(response)
             
             # Output the response
-            print("\nGenerated Response:")
-            print(json.dumps(response, indent=2))
+            self.logger.info("Generated Response:\n" + json.dumps(response, indent=2))
             
             # If not requiring human review and has approved artifacts, could auto-send
             if not response.get("requires_human_review") and response.get("approved_artifacts"):
-                print("✅ Ready for automated response")
+                self.logger.info("✅ Ready for automated response")
             elif response.get("requires_human_review"):
-                print(f"⚠️ Requires human review: {response.get('routing_reason')}")
+                self.logger.warning(f"⚠️ Requires human review: {response.get('routing_reason')}")
         
         return responses
     
     def start_continuous_monitoring(self, interval_seconds: int = 60):
         """Start continuous monitoring loop"""
-        print(f"Starting Gmail monitoring (checking every {interval_seconds} seconds)")
-        print("Press Ctrl+C to stop")
+        self.logger.info(f"Starting Gmail monitoring (checking every {interval_seconds} seconds)")
+        self.logger.info("Press Ctrl+C to stop")
         
         try:
             while True:
                 self.run_monitoring_cycle()
                 time.sleep(interval_seconds)
         except KeyboardInterrupt:
-            print("\nMonitoring stopped")
+            self.logger.info("Monitoring stopped")
 
 if __name__ == "__main__":
-    print("Gmail Monitor for Sales Desk")
-    print("=" * 60)
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger('gmail_monitor')
+    logger.info("Gmail Monitor for Sales Desk")
     
     monitor = GmailMonitor()
     
     # Run a single cycle for testing
-    print("\nRunning single monitoring cycle...")
+    logger.info("Running single monitoring cycle...")
     responses = monitor.run_monitoring_cycle()
     
     if responses:
-        print("\n" + "=" * 60)
-        print("PROCESSING SUMMARY")
-        print("=" * 60)
+        logger.info("PROCESSING SUMMARY")
         for resp in responses:
             if "error" not in resp:
-                print(f"\nMessage ID: {resp.get('message_id')}")
-                print(f"Detected Artifacts: {resp.get('detected_artifacts')}")
-                print(f"Approved: {resp.get('approved_artifacts')}")
-                print(f"Denied: {resp.get('denied_artifacts')}")
-                print(f"Human Review: {resp.get('requires_human_review')}")
+                logger.info(f"Message ID: {resp.get('message_id')}")
+                logger.info(f"Detected Artifacts: {resp.get('detected_artifacts')}")
+                logger.info(f"Approved: {resp.get('approved_artifacts')}")
+                logger.info(f"Denied: {resp.get('denied_artifacts')}")
+                logger.info(f"Human Review: {resp.get('requires_human_review')}")
     
-    # Option to start continuous monitoring
-    print("\n" + "=" * 60)
-    print("To start continuous monitoring, run:")
-    print("  monitor.start_continuous_monitoring(interval_seconds=60)")
+    logger.info("To start continuous monitoring, run monitor.start_continuous_monitoring(interval_seconds=60)")
