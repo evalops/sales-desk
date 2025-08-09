@@ -26,3 +26,7 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+      - name: Run Pyrefly type check (suppressed)
+        run: |
+          pip install pyrefly
+          pyrefly check --suppress-errors
