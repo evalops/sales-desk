@@ -264,6 +264,24 @@ PostgreSQL schema included for:
 - Metrics collection
 - Secure link tracking
 
+### 🗄️ Persistence Configuration
+- Backends: `memory` (default), `redis`, or `postgres`.
+- Configure via `config.yaml` under `settings.persistence` or environment variables:
+  - `PERSISTENCE_BACKEND=postgres|redis|memory`
+  - `DATABASE_URL=postgresql://user:pass@host:5432/db` (for Postgres)
+  - `REDIS_URL=redis://host:6379/0` (for Redis)
+
+Docker Compose (recommended):
+- `docker-compose.yml` includes a `postgres` service and wires the app with:
+  - `PERSISTENCE_BACKEND=postgres`
+  - `DATABASE_URL=postgresql://salesdesk:${DB_PASSWORD}@postgres:5432/salesdesk`
+- Start DB only: `docker-compose up -d postgres`
+- Start everything: `docker-compose up -d`
+
+Notes:
+- The app auto-creates minimal webhook idempotency tables. Full schema in `init.sql` is mounted into Postgres by Compose.
+- Switch to Redis by setting `PERSISTENCE_BACKEND=redis` and `REDIS_URL`.
+
 ### 🔒 Enhanced Security
 - Retry logic with exponential backoff
 - Audit logging for compliance
