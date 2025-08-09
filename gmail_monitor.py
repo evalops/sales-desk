@@ -12,7 +12,7 @@ from gmail_tool import GmailTool
 from sales_desk import SalesDesk
 from crewai import Agent, Task, Crew, Process
 from dotenv import load_dotenv
-from utils import load_config
+from utils import load_config, get_bool_setting
 import logging
 
 load_dotenv()
@@ -213,12 +213,8 @@ class GmailMonitor:
             # If not requiring human review and has approved artifacts, could auto-send
             if not response.get("requires_human_review") and response.get("approved_artifacts"):
                 self.logger.info("✅ Ready for automated response")
-                try:
-                    auto_send = bool(self.config.get("settings", {}).get("auto_send_when_approved", False))
-                    dry_run = bool(self.config.get("settings", {}).get("dry_run", False))
-                except Exception:
-                    auto_send = False
-                    dry_run = False
+                auto_send = get_bool_setting(self.config, ["settings", "auto_send_when_approved"], "AUTO_SEND_WHEN_APPROVED", False)
+                dry_run = get_bool_setting(self.config, ["settings", "dry_run"], "DRY_RUN", False)
                 if auto_send:
                     # Extract recipient from processed message; best-effort
                     recipient = ""

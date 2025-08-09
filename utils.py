@@ -414,3 +414,28 @@ def get_state_store(config: Dict[str, Any]) -> StateStore:
         return PostgresStateStore(dsn)
     # Default
     return MemoryStateStore()
+
+
+def get_bool_setting(config: Dict[str, Any], path: List[str], env_var: Optional[str], default: bool) -> bool:
+    """Resolve a boolean setting with optional environment variable override.
+
+    - path: list to traverse under config (e.g., ["settings", "dry_run"]).
+    - env_var: if set and present in environment, that value wins (truthy strings like '1','true','yes').
+    - default: fallback if not found.
+    """
+    # Env override
+    if env_var:
+        val = os.getenv(env_var)
+        if val is not None:
+            return str(val).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    # Config path
+    cur: Any = config
+    try:
+        for p in path:
+            if isinstance(cur, dict) and p in cur:
+                cur = cur[p]
+            else:
+                return default
+        return bool(cur)
+    except Exception:
+        return default

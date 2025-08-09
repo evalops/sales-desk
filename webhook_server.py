@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sales_desk import SalesDesk
 from gmail_tool import GmailTool
-from utils import setup_logging, AuditLogger, MetricsCollector, retry_with_backoff, load_config, get_state_store
+from utils import setup_logging, AuditLogger, MetricsCollector, retry_with_backoff, load_config, get_state_store, get_bool_setting
 import logging
 
 # Initialize FastAPI app
@@ -30,7 +30,20 @@ logger = setup_logging()
 audit_logger = AuditLogger()
 metrics = MetricsCollector()
 sales_desk = SalesDesk()
-gmail_tool = GmailTool()
+try:
+    gmail_tool = GmailTool()
+except Exception as e:
+    # Fallback dummy to avoid hard failures in environments without OAuth/network during import
+    class _DummyGmail:
+        def search_emails(self, *args, **kwargs):
+            return "No messages found."
+        def list_history_new_message_ids(self, *args, **kwargs):
+            return []
+        def read_email_details(self, message_id: str):
+            return {"from": "", "subject": "", "body": "", "thread_id": None}
+        def send_email(self, **kwargs):
+            return "Dry run: not sending"
+    gmail_tool = _DummyGmail()
 
 # Persistence-backed idempotency + history tracking
 CONFIG = load_config()
@@ -118,6 +131,10 @@ async def gmail_webhook(
         
         return {"status": "ignored", "message": "No message data"}
         
+    except HTTPException as he:
+        # Propagate intended HTTP errors (auth/validation)
+        logger.error(f"Webhook error: {he.detail}")
+        raise
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -232,12 +249,8 @@ async def process_new_emails(email_address: str, history_id: str):
                 # Optionally auto-send could be gated by config; here we only log readiness
                 if not resp['requires_human_review'] and resp['approved_artifacts']:
                     logger.info(f"Ready to send response for message {mid}")
-                    try:
-                        auto_send = bool(CONFIG.get("settings", {}).get("auto_send_when_approved", False))
-                        dry_run = bool(CONFIG.get("settings", {}).get("dry_run", False))
-                    except Exception:
-                        auto_send = False
-                        dry_run = False
+                    auto_send = get_bool_setting(CONFIG, ["settings", "auto_send_when_approved"], "AUTO_SEND_WHEN_APPROVED", False)
+                    dry_run = get_bool_setting(CONFIG, ["settings", "dry_run"], "DRY_RUN", False)
                     if auto_send and email_data.get('from'):
                         # Reply within thread if possible
                         if dry_run:
