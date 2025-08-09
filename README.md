@@ -1,6 +1,7 @@
 # Sales Desk - AI-Powered Security Document Request Handler
 
 ![Python Tests](https://github.com/evalops/sales-desk/actions/workflows/python-tests.yml/badge.svg?branch=main)
+![Pyrefly Type Check](https://github.com/evalops/sales-desk/actions/workflows/pyrefly.yml/badge.svg?branch=main)
 
 An intelligent system that monitors Gmail for inbound security and due diligence document requests, automatically detects requested artifacts, applies organizational policies, and generates appropriate responses.
 
