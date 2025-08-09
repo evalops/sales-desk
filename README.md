@@ -281,6 +281,10 @@ Docker Compose (recommended):
 Notes:
 - The app auto-creates minimal webhook idempotency tables. Full schema in `init.sql` is mounted into Postgres by Compose.
 - Switch to Redis by setting `PERSISTENCE_BACKEND=redis` and `REDIS_URL`.
+  - Compose already includes a `redis` service. Example env:
+    - `PERSISTENCE_BACKEND=redis`
+    - `REDIS_URL=redis://redis:6379/0`
+  - You can bring up Redis alone with: `docker-compose up -d redis`
 
 ### 🔒 Enhanced Security
 - Retry logic with exponential backoff

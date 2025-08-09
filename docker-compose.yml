@@ -11,6 +11,7 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - PERSISTENCE_BACKEND=${PERSISTENCE_BACKEND:-postgres}
       - DATABASE_URL=postgresql://salesdesk:${DB_PASSWORD:-salesdesk123}@postgres:5432/salesdesk
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - WEBHOOK_SHARED_SECRET=${WEBHOOK_SHARED_SECRET:-changeme}
       - PYTHONUNBUFFERED=1
     volumes:
@@ -21,6 +22,7 @@ services:
     command: python main.py monitor --interval 60
     depends_on:
       - postgres
+      - redis
     logging:
       driver: json-file
       options:
