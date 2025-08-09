@@ -203,3 +203,6 @@ settings:
     backend: memory  # memory | redis | postgres
     redis_url: "redis://localhost:6379/0"
     ttl_days: 7
+
+  # Automation
+  auto_send_when_approved: false

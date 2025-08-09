@@ -232,6 +232,26 @@ async def process_new_emails(email_address: str, history_id: str):
                 # Optionally auto-send could be gated by config; here we only log readiness
                 if not resp['requires_human_review'] and resp['approved_artifacts']:
                     logger.info(f"Ready to send response for message {mid}")
+                    try:
+                        auto_send = bool(CONFIG.get("settings", {}).get("auto_send_when_approved", False))
+                    except Exception:
+                        auto_send = False
+                    if auto_send and email_data.get('from'):
+                        # Reply within thread if possible
+                        thread_id = details.get('thread_id')
+                        result = gmail_tool.send_email(
+                            to=email_data['from'],
+                            subject="Re: Security Documentation Request",
+                            body=resp['response_message'],
+                            thread_id=thread_id,
+                        )
+                        audit_logger.log_document_sent(
+                            email_data['from'],
+                            resp['approved_artifacts'],
+                            'secure_link',
+                            resp.get('link_expiration'),
+                        )
+                        logger.info(f"Auto-sent response to {email_data['from']}: {result}")
             except Exception as e:
                 logger.error(f"Error processing message {mid}: {e}")
                 metrics.record_error()
@@ -289,12 +309,14 @@ async def internal_error(request: Request, exc):
     )
 
 # Startup and shutdown events
+# pyrefly: ignore  # deprecated
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
     logger.info("Sales Desk Webhook Server starting...")
     # Initialize database connections, etc.
 
+# pyrefly: ignore  # deprecated
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""

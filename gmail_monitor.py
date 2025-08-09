@@ -207,6 +207,22 @@ class GmailMonitor:
             # If not requiring human review and has approved artifacts, could auto-send
             if not response.get("requires_human_review") and response.get("approved_artifacts"):
                 self.logger.info("✅ Ready for automated response")
+                try:
+                    auto_send = bool(self.config.get("settings", {}).get("auto_send_when_approved", False))
+                except Exception:
+                    auto_send = False
+                if auto_send:
+                    # Extract recipient from processed message; best-effort
+                    recipient = ""
+                    try:
+                        # Re-read details to get a clean From header
+                        details = self.gmail.read_email_details(msg_id)
+                        recipient = details.get("from", "") if isinstance(details, dict) else ""
+                    except Exception:
+                        recipient = ""
+                    if recipient:
+                        sent = self.send_response(response, recipient)
+                        self.logger.info(f"📤 Auto-sent response to {recipient}: {'ok' if sent else 'failed'}")
             elif response.get("requires_human_review"):
                 self.logger.warning(f"⚠️ Requires human review: {response.get('routing_reason')}")
         
