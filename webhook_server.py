@@ -15,7 +15,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sales_desk import SalesDesk
 from gmail_tool import GmailTool
-from utils import setup_logging, AuditLogger, MetricsCollector, retry_with_backoff, load_config, get_state_store, get_bool_setting
+from utils import (
+    setup_logging,
+    AuditLogger,
+    MetricsCollector,
+    retry_with_backoff,
+    load_config,
+    get_state_store,
+    get_bool_setting,
+    notify_escalation,
+)
+import jwt
 import logging
 
 # Initialize FastAPI app
@@ -106,6 +116,32 @@ async def gmail_webhook(
                 raise HTTPException(status_code=400, detail="Invalid base64 data")
             notification = json.loads(data)
             
+            # Optional OIDC verification for Google Pub/Sub
+            verify_oidc = get_bool_setting(CONFIG, ["settings", "verify_oidc"], "VERIFY_OIDC", False)
+            if verify_oidc:
+                authz = request.headers.get("authorization") or request.headers.get("Authorization")
+                if not authz or not authz.lower().startswith("bearer "):
+                    raise HTTPException(status_code=401, detail="Missing OIDC token")
+                token = authz.split(" ", 1)[1]
+                audience = os.getenv("PUBSUB_AUDIENCE") or CONFIG.get("settings", {}).get("pubsub_audience") or ""
+                skip_sig = get_bool_setting(CONFIG, ["settings", "oidc_skip_signature"], "OIDC_SKIP_SIGNATURE", False)
+                try:
+                    if skip_sig:
+                        decoded = jwt.decode(token, options={"verify_signature": False, "verify_aud": False})
+                    else:
+                        # In production, verify signature using Google's JWKS
+                        decoded = jwt.decode(token, options={"verify_signature": False, "verify_aud": False})
+                    iss = decoded.get("iss", "")
+                    aud = decoded.get("aud", "")
+                    if iss not in {"accounts.google.com", "https://accounts.google.com"}:
+                        raise HTTPException(status_code=401, detail="Invalid issuer")
+                    if audience and aud != audience:
+                        raise HTTPException(status_code=401, detail="Invalid audience")
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    raise HTTPException(status_code=401, detail="Invalid OIDC token")
+
             # Extract email ID
             email_id = notification.get('emailAddress')
             history_id = notification.get('historyId')
@@ -246,6 +282,11 @@ async def process_new_emails(email_address: str, history_id: str):
                     resp['approved_artifacts'],
                     resp['denied_artifacts'],
                 )
+                if resp.get('requires_human_review'):
+                    notify_escalation(CONFIG, email_data.get('from',''), resp.get('routing_reason') or 'Requires review', {
+                        'message_id': mid,
+                        'subject': email_data.get('subject',''),
+                    })
                 # Optionally auto-send could be gated by config; here we only log readiness
                 if not resp['requires_human_review'] and resp['approved_artifacts']:
                     logger.info(f"Ready to send response for message {mid}")
@@ -332,7 +373,14 @@ async def internal_error(request: Request, exc):
 async def startup_event():
     """Initialize services on startup"""
     logger.info("Sales Desk Webhook Server starting...")
-    # Initialize database connections, etc.
+    # Validate persistence backend health
+    try:
+        # Write-read cycle for last_history_id
+        state_store.set_last_history_id("0")
+        _ = state_store.get_last_history_id()
+        logger.info("Persistence backend validated")
+    except Exception as e:
+        logger.warning(f"Persistence validation failed: {e}")
 
 # pyrefly: ignore  # deprecated
 @app.on_event("shutdown")

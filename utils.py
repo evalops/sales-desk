@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional, TypedDict
 from functools import wraps
 from datetime import datetime
 import json
+import requests
 
 def setup_logging(config_path: str = "config.yaml") -> logging.Logger:
     """Setup logging configuration from config file"""
@@ -236,6 +237,39 @@ def generate_secure_link(artifact_id: str, recipient: str, expiration_days: int 
     token = base64.urlsafe_b64encode(hash_value).decode()[:32]
     
     return f"https://secure.yourcompany.com/docs/{token}"
+
+
+def post_slack_message(webhook_url: str, text: str, blocks: Optional[List[Dict[str, Any]]] = None) -> bool:
+    """Post a message to Slack via incoming webhook.
+
+    Returns True on success, False otherwise. Never raises.
+    """
+    try:
+        payload: Dict[str, Any] = {"text": text}
+        if blocks:
+            payload["blocks"] = blocks
+        resp = requests.post(webhook_url, json=payload, timeout=5)
+        return 200 <= resp.status_code < 300
+    except Exception:
+        logging.getLogger('sales_desk').warning("Slack post failed (ignored)")
+        return False
+
+
+def notify_escalation(config: Dict[str, Any], email_from: str, reason: str, details: Dict[str, Any]) -> None:
+    """Notify escalation via Slack if enabled.
+
+    Uses settings.notifications.slack.enabled and webhook_url or SLACK_WEBHOOK_URL env.
+    """
+    try:
+        notif = (config.get("settings", {}).get("notifications", {}) or {})
+        slack_cfg = (notif.get("slack") or {})
+        enabled = bool(slack_cfg.get("enabled", False))
+        webhook_url = os.getenv("SLACK_WEBHOOK_URL") or slack_cfg.get("webhook_url")
+        if enabled and webhook_url:
+            text = f"Escalation: {reason}\nFrom: {email_from}\nDetails: {json.dumps(details)[:500]}"
+            post_slack_message(webhook_url, text)
+    except Exception:
+        logging.getLogger('sales_desk').warning("notify_escalation failed (ignored)")
 
 
 # Persistence for webhook idempotency and history tracking

@@ -208,3 +208,13 @@ settings:
   auto_send_when_approved: false
   # Dry-run mode: don't actually send emails; only log intents
   dry_run: false
+
+  # Notifications
+  notifications:
+    slack:
+      enabled: false
+      webhook_url: ""
+
+  # Webhook security
+  verify_oidc: false
+  pubsub_audience: ""
