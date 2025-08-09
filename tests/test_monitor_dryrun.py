@@ -6,9 +6,10 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from gmail_monitor import GmailMonitor
+from gmail_tool import GmailTool
 
 
-class DummyGmail:
+class DummyGmail(GmailTool):
     def send_email(self, **kwargs):
         raise RuntimeError("Should not be called in dry-run")
 

@@ -1,2 +1,2 @@
-project-includes = ["**/*"]
-project-excludes = ["**/*venv/**/*"]
+project_includes = ["**/*"]
+project_excludes = ["**/*venv/**/*", "tests/**/*"]
